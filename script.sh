@@ -10,12 +10,20 @@ DISKS=$(aws ec2 describe-instances \
   --query "Reservations[].Instances[].BlockDeviceMappings" \
   --output json)
 
+# Exibir o JSON retornado (para depuração)
+echo "Discos associados à instância: $DISKS"
+
 # Verificar se há discos e iterar sobre eles
 echo "$DISKS" | jq -c '.[]' | while read -r disk; do
-  # Garantir que os campos 'Ebs' e 'DeviceName' existem
-  if echo "$disk" | jq -e '.Ebs' > /dev/null && echo "$disk" | jq -e '.DeviceName' > /dev/null; then
-    DELETE_ON_TERMINATION=$(echo "$disk" | jq -r '.Ebs.DeleteOnTermination')
-    DEVICE_NAME=$(echo "$disk" | jq -r '.DeviceName')
+  # Validar se o campo Ebs existe no JSON
+  if echo "$disk" | jq -e '.Ebs' > /dev/null; then
+    DEVICE_NAME=$(echo "$disk" | jq -r '.DeviceName // empty')
+    DELETE_ON_TERMINATION=$(echo "$disk" | jq -r '.Ebs.DeleteOnTermination // empty')
+
+    if [ -z "$DEVICE_NAME" ]; then
+      echo "Erro: 'DeviceName' não encontrado para um disco."
+      continue
+    fi
 
     # Verificar se DeleteOnTermination está desabilitado
     if [ "$DELETE_ON_TERMINATION" == "false" ]; then
@@ -25,9 +33,11 @@ echo "$DISKS" | jq -c '.[]' | while read -r disk; do
       aws ec2 modify-instance-attribute \
         --instance-id "$INSTANCE_ID" \
         --block-device-mappings "[{\"DeviceName\": \"$DEVICE_NAME\", \"Ebs\": {\"DeleteOnTermination\": true}}]"
+    else
+      echo "O disco $DEVICE_NAME já está com DeleteOnTermination habilitado."
     fi
   else
-    echo "Erro: Campos 'Ebs' ou 'DeviceName' não encontrados para um disco."
+    echo "Erro: Campo 'Ebs' não encontrado no disco."
   fi
 done
 
