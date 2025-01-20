@@ -13,8 +13,8 @@ DISKS=$(aws ec2 describe-instances \
 # Exibir o JSON retornado (para depuração)
 echo "Discos associados à instância: $DISKS"
 
-# Verificar se há discos e iterar sobre eles
-echo "$DISKS" | jq -c '.[]' | while read -r disk; do
+# Iterar sobre os discos na estrutura JSON (duas camadas de arrays)
+echo "$DISKS" | jq -c '.[][]' | while read -r disk; do
   # Validar se o campo Ebs existe no JSON
   if echo "$disk" | jq -e '.Ebs' > /dev/null; then
     DEVICE_NAME=$(echo "$disk" | jq -r '.DeviceName // empty')
