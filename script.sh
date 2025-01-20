@@ -10,35 +10,23 @@ DISKS=$(aws ec2 describe-instances \
   --query "Reservations[].Instances[].BlockDeviceMappings" \
   --output json)
 
-# Exibir o JSON retornado (para depuração)
-echo "Discos associados à instância: $DISKS"
+# Filtra os dispositivos que têm DeleteOnTermination = false
+DEVICE_NAMES=$(echo "$DISKS" | jq -r '.[][] | select(.Ebs.DeleteOnTermination == false) | .DeviceName')
 
-# Iterar sobre os discos na estrutura JSON (duas camadas de arrays)
-echo "$DISKS" | jq -c '.[][]' | while read -r disk; do
-  # Validar se o campo Ebs existe no JSON
-  if echo "$disk" | jq -e '.Ebs' > /dev/null; then
-    DEVICE_NAME=$(echo "$disk" | jq -r '.DeviceName // empty')
-    DELETE_ON_TERMINATION=$(echo "$disk" | jq -r '.Ebs.DeleteOnTermination // empty')
+# Prepara o bloco de mapeamento de dispositivos para alterar a configuração
+BLOCK_DEVICE_MAPPING="["
 
-    if [ -z "$DEVICE_NAME" ]; then
-      echo "Erro: 'DeviceName' não encontrado para um disco."
-      continue
-    fi
-
-    # Verificar se DeleteOnTermination está desabilitado
-    if [ "$DELETE_ON_TERMINATION" == "false" ]; then
-      echo "Habilitando DeleteOnTermination para o disco: $DEVICE_NAME"
-
-      # Habilitar DeleteOnTermination para o disco atual
-      aws ec2 modify-instance-attribute \
-        --instance-id "$INSTANCE_ID" \
-        --block-device-mappings "[{\"DeviceName\": \"$DEVICE_NAME\", \"Ebs\": {\"DeleteOnTermination\": true}}]"
-    else
-      echo "O disco $DEVICE_NAME já está com DeleteOnTermination habilitado."
-    fi
-  else
-    echo "Erro: Campo 'Ebs' não encontrado no disco."
-  fi
+# Para cada dispositivo, cria o mapeamento de modificação
+for DEVICE_NAME in $DEVICE_NAMES; do
+  BLOCK_DEVICE_MAPPING+="{\"DeviceName\": \"$DEVICE_NAME\", \"Ebs\": {\"DeleteOnTermination\": true}},"
 done
+
+# Remove a vírgula extra no final
+BLOCK_DEVICE_MAPPING="${BLOCK_DEVICE_MAPPING%,}]"
+
+# Habilitar DeleteOnTermination para os discos filtrados
+aws ec2 modify-instance-attribute \
+  --instance-id "$INSTANCE_ID" \
+  --block-device-mappings "$BLOCK_DEVICE_MAPPING"
 
 echo "Configuração concluída!"
